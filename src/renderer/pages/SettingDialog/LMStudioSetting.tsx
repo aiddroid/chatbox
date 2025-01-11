@@ -34,7 +34,7 @@ export function LMStudioHostInput(props: {
                         <Trans i18nKey='Please ensure that the Remote LMStudio Service is able to connect remotely. For more details, refer to <a>this tutorial</a>.'
                             components={{
                                 a: <a className='cursor-pointer font-bold' onClick={() => {
-                                    platform.openLink(`https://chatboxai.app/redirect_app/LMStudio_guide/${language}`)
+                                    platform.openLink(`https://chatboxai.app/redirect_app/lm_studio_guide/${language}`)
                                 }}></a>,
                             }}
                         />
@@ -46,8 +46,8 @@ export function LMStudioHostInput(props: {
 }
 
 export function LMStudioModelSelect(props: {
-    LMStudioModel: ModelSettings['LMStudioModel']
-    setLMStudioModel: (model: ModelSettings['LMStudioModel']) => void
+    LMStudioModel: ModelSettings['lmStudioModel']
+    setLMStudioModel: (model: ModelSettings['lmStudioModel']) => void
     LMStudioHost: string
     className?: string
 }) {
@@ -55,8 +55,8 @@ export function LMStudioModelSelect(props: {
     const [models, setModels] = useState<string[]>([])
     useEffect(() => {
         const model = new LMStudio({
-            LMStudioHost: props.LMStudioHost,
-            LMStudioModel: props.LMStudioModel,
+            lmStudioHost: props.LMStudioHost,
+            lmStudioModel: props.LMStudioModel,
             temperature: 0.5
         })
         model.listModels().then((models) => {
