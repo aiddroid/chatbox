@@ -2,7 +2,7 @@ import { apiRequest } from '@/utils/request'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { ModelMeta } from 'src/shared/types'
 import AbstractAISDKModel from './abstract-ai-sdk'
-import { ModelHelpers } from './base'
+import { ModelHelpers } from './types'
 import { ApiError } from './errors'
 
 // https://docs.anthropic.com/claude/docs/models-overview
@@ -55,8 +55,12 @@ export default class Claude extends AbstractAISDKModel {
   }
 
   protected getChatModel() {
+    let host = this.options.claudeApiHost
+    if (host === 'https://api.anthropic.com') {
+      host = `${host}/v1`
+    }
     const provider = createAnthropic({
-      baseURL: this.options.claudeApiHost,
+      baseURL: host,
       apiKey: this.options.claudeApiKey,
       headers: {
         'anthropic-dangerous-direct-browser-access': 'true',

@@ -6,7 +6,7 @@ import * as localParser from '@/packages/local-parser'
 import { generateImage, generateText, streamText } from '@/packages/model-calls'
 import { getModelDisplayName, isModelSupportToolUse } from '@/packages/model-setting-utils'
 import { getModel } from '@/packages/models'
-import type { onResultChangeWithCancel } from '@/packages/models/base'
+import type { onResultChangeWithCancel } from '@/packages/models/types'
 import {
   AIProviderNoImplementedPaintError,
   ApiError,
@@ -554,17 +554,17 @@ export async function submitNewUserMessage(params: {
 
     // 如果本次发送消息携带了附件，应该在这次发送中上传文件并构造文件信息(file uuid)
     if (attachments && attachments.length > 0) {
-      if (settings.aiProvider === ModelProvider.ChatboxAI) {
+      if (isChatboxAI) {
         // Chatbox AI 方案
         const licenseKey = settingActions.getLicenseKey()
         const newFiles: MessageFile[] = []
         for (const attachment of attachments || []) {
-          const fileUUID = await remote.uploadAndCreateUserFile(licenseKey || '', attachment)
+          const storageKey = await remote.uploadAndCreateUserFile(licenseKey || '', attachment)
           newFiles.push({
-            id: fileUUID,
+            id: storageKey,
             name: attachment.name,
             fileType: attachment.type,
-            chatboxAIFileUUID: fileUUID,
+            storageKey,
           })
         }
         modifyMessage(currentSessionId, { ...newUserMsg, files: newFiles }, false)
@@ -602,10 +602,10 @@ export async function submitNewUserMessage(params: {
           links.map(async (l) => {
             const parsed = await remote.parseUserLinkPro({ licenseKey: licenseKey || '', url: l.url })
             return {
-              id: parsed.uuid,
+              id: parsed.key,
               url: l.url,
               title: parsed.title,
-              chatboxAILinkUUID: parsed.uuid,
+              storageKey: parsed.storageKey,
             }
           })
         )
@@ -698,9 +698,6 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
     errorExtra: undefined,
     status: [],
     firstTokenLatency: undefined,
-  }
-  if (options?.webBrowsing) {
-    targetMsg.status?.push({ type: 'web_browsing' })
   }
 
   modifyMessage(sessionId, targetMsg)
@@ -844,7 +841,7 @@ export async function generateMoreInNewFork(sessionId: string, msgId: string) {
   await generateMore(sessionId, msgId)
 }
 
-export async function regenerateInNewFork(sessionId: string, msg: Message) {
+export async function regenerateInNewFork(sessionId: string, msg: Message, options?: { webBrowsing?: boolean }) {
   const messageList = getCurrentMessages()
   const messageIndex = messageList.findIndex((m) => m.id === msg.id)
   const previousMessageIndex = messageIndex - 1
@@ -855,7 +852,7 @@ export async function regenerateInNewFork(sessionId: string, msg: Message) {
   }
   const forkMessage = messageList[previousMessageIndex]
   await createNewFork(forkMessage.id)
-  return generateMore(sessionId, forkMessage.id, { webBrowsing: !!msg.webBrowsing })
+  return generateMore(sessionId, forkMessage.id, { webBrowsing: options?.webBrowsing })
 }
 
 async function _generateName(sessionId: string, modifyName: (sessionId: string, name: string) => void) {

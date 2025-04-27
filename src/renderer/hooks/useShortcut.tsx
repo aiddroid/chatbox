@@ -1,29 +1,37 @@
+import { useNavigate } from '@tanstack/react-router'
+import { getDefaultStore } from 'jotai'
 import { useEffect } from 'react'
 import platform from '../platform'
-import * as dom from './dom'
 import * as atoms from '../stores/atoms'
 import * as sessionActions from '../stores/sessionActions'
-import { getDefaultStore } from 'jotai'
+import * as dom from './dom'
 import { useIsSmallScreen } from './useScreenChange'
+
+type NavigationCallback = (path: string) => void
 
 export default function useShortcut() {
   const isSmallScreen = useIsSmallScreen()
+  const navigate = useNavigate()
+
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keyboardShortcut(e, (path) => navigate({ to: path }))
+    }
     const cancel = platform.onWindowShow(() => {
       // 大屏幕下，窗口显示时自动聚焦输入框
       if (!isSmallScreen) {
         dom.focusMessageInput()
       }
     })
-    window.addEventListener('keydown', keyboardShortcut)
+    window.addEventListener('keydown', handleKeyDown)
     return () => {
       cancel()
-      window.removeEventListener('keydown', keyboardShortcut)
+      window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isSmallScreen])
+  }, [isSmallScreen, navigate])
 }
 
-function keyboardShortcut(e: KeyboardEvent) {
+function keyboardShortcut(e: KeyboardEvent, navigate?: NavigationCallback) {
   // 这里不用 e.key 是因为 alt、 option、shift 都会改变 e.key 的值
   const ctrlOrCmd = e.ctrlKey || e.metaKey
   const shift = e.shiftKey
@@ -82,5 +90,10 @@ function keyboardShortcut(e: KeyboardEvent) {
     } else {
       store.set(atoms.openSearchDialogAtom, true)
     }
+  }
+  if (e.code === 'Comma' && ctrlOrCmd && navigate) {
+    e.preventDefault()
+    navigate('/settings')
+    return
   }
 }

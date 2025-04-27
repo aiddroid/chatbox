@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo, MouseEventHandler } from 'react'
+import React, { useEffect, useState, useRef, useMemo, MouseEventHandler, memo, FC } from 'react'
 import Box from '@mui/material/Box'
 import Avatar from '@mui/material/Avatar'
 import MenuItem from '@mui/material/MenuItem'
@@ -34,6 +34,7 @@ import {
   autoPreviewArtifactsAtom,
   autoCollapseCodeBlockAtom,
   showFirstTokenLatencyAtom,
+  inputBoxWebBrowsingModeAtom,
 } from '../stores/atoms'
 import { currentSessionPicUrlAtom, showTokenUsedAtom } from '../stores/atoms'
 import * as sessionActions from '../stores/sessionActions'
@@ -47,7 +48,6 @@ import ImageIcon from '@mui/icons-material/Image'
 import MessageErrTips from './MessageErrTips'
 import MessageStatuses from './MessageLoading'
 import { MessageAttachment } from './Attachments'
-import MessageWebBrowsing from './MessageWebBrowsing'
 import StyledMenu from './StyledMenu'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import * as dom from '@/hooks/dom'
@@ -66,8 +66,9 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import Loading from './icons/Loading'
 import { getMessageText } from '@/utils/message'
 import { isEmpty } from 'lodash'
+import { ToolCallPartUI } from './message-parts/ToolCallPartUI'
 
-export interface Props {
+interface Props {
   id?: string
   sessionId: string
   sessionType: SessionType
@@ -79,7 +80,7 @@ export interface Props {
   preferCollapsedCodeBlock?: boolean
 }
 
-function _Message(props: Props) {
+const Message: FC<Props> = (props) => {
   const { msg, className, collapseThreshold, hiddenButtonGroup, small, preferCollapsedCodeBlock } = props
 
   const navigate = useNavigate()
@@ -104,6 +105,7 @@ function _Message(props: Props) {
   const widthFull = useAtomValue(widthFullAtom)
   const autoPreviewArtifacts = useAtomValue(autoPreviewArtifactsAtom)
   const autoCollapseCodeBlock = useAtomValue(autoCollapseCodeBlockAtom)
+  const webBrowsingMode = useAtomValue(inputBoxWebBrowsingModeAtom)
 
   const [previewArtifact, setPreviewArtifact] = useState(autoPreviewArtifacts)
   const contentLength = useMemo(() => {
@@ -154,7 +156,7 @@ function _Message(props: Props) {
 
   const handleRefresh = () => {
     handleStop()
-    sessionActions.regenerateInNewFork(props.sessionId, msg)
+    sessionActions.regenerateInNewFork(props.sessionId, msg, { webBrowsing: webBrowsingMode })
     // sessionActions.generate(props.sessionId, msg)
   }
 
@@ -546,46 +548,45 @@ function _Message(props: Props) {
                 }
                 {contentParts && contentParts.length > 0 && (
                   <div>
-                    {contentParts.map(
-                      (item, index) =>
-                        item.type === 'text' ? (
+                    {contentParts.map((item, index) =>
+                      item.type === 'text' ? (
+                        <div key={index}>
+                          {enableMarkdownRendering && !isCollapsed ? (
+                            <Markdown
+                              enableLaTeXRendering={enableLaTeXRendering}
+                              enableMermaidRendering={enableMermaidRendering}
+                              generating={msg.generating}
+                              preferCollapsedCodeBlock={
+                                autoCollapseCodeBlock &&
+                                (preferCollapsedCodeBlock || msg.role !== 'assistant' || previewArtifact)
+                              }
+                            >
+                              {item.text || ''}
+                            </Markdown>
+                          ) : (
+                            <div style={{ whiteSpace: 'pre-line' }}>
+                              {needCollapse && isCollapsed ? item.text.slice(0, collapseThreshold) + '...' : item.text}
+                              {needCollapse && isCollapsed && CollapseButton}
+                            </div>
+                          )}
+                        </div>
+                      ) : item.type === 'image' ? (
+                        props.sessionType !== 'picture' && (
                           <div key={index}>
-                            {enableMarkdownRendering && !isCollapsed ? (
-                              <Markdown
-                                enableLaTeXRendering={enableLaTeXRendering}
-                                enableMermaidRendering={enableMermaidRendering}
-                                generating={msg.generating}
-                                preferCollapsedCodeBlock={
-                                  autoCollapseCodeBlock &&
-                                  (preferCollapsedCodeBlock || msg.role !== 'assistant' || previewArtifact)
-                                }
-                              >
-                                {item.text || ''}
-                              </Markdown>
-                            ) : (
-                              <div style={{ whiteSpace: 'pre-line' }}>
-                                {needCollapse && isCollapsed
-                                  ? item.text.slice(0, collapseThreshold) + '...'
-                                  : item.text}
-                                {needCollapse && isCollapsed && CollapseButton}
-                              </div>
-                            )}
-                          </div>
-                        ) : item.type === 'image' ? (
-                          props.sessionType !== 'picture' && (
-                            <div key={index}>
-                              <div
-                                className="w-[100px] min-w-[100px] h-[100px] min-h-[100px]
+                            <div
+                              className="w-[100px] min-w-[100px] h-[100px] min-h-[100px]
                                                     md:w-[200px] md:min-w-[200px] md:h-[200px] md:min-h-[200px]
                                                     inline-flex items-center justify-center                                                                                                                                                  
                                                     hover:cursor-pointer hover:border-slate-800/20 transition-all duration-200"
-                                onClick={() => showPicture(item.storageKey)}
-                              >
-                                {item.storageKey && <ImageInStorage storageKey={item.storageKey} className="w-full" />}
-                              </div>
+                              onClick={() => showPicture(item.storageKey)}
+                            >
+                              {item.storageKey && <ImageInStorage storageKey={item.storageKey} className="w-full" />}
                             </div>
-                          )
-                        ) : null // 还有 tool-call 类型，这类消息是中间产物，暂时不会持久化到 session 中
+                          </div>
+                        )
+                      ) : item.type === 'tool-call' ? (
+                        <ToolCallPartUI key={item.toolCallId} part={item} />
+                      ) : null
                     )}
                   </div>
                 )}
@@ -645,7 +646,6 @@ function _Message(props: Props) {
                   setPreview={setPreviewArtifact}
                 />
               )}
-              {msg.webBrowsing && <MessageWebBrowsing webBrowsing={msg.webBrowsing} />}
 
               {msg.generating && <Loading />}
 
@@ -796,8 +796,4 @@ function _Message(props: Props) {
   )
 }
 
-export default function Message(props: Props) {
-  return useMemo(() => {
-    return <_Message {...props} />
-  }, [props.msg])
-}
+export default memo(Message)

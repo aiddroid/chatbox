@@ -2,7 +2,7 @@ import { apiRequest } from '@/utils/request'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { LanguageModelV1 } from 'ai'
 import AbstractAISDKModel, { CallSettings } from './abstract-ai-sdk'
-import { CallChatCompletionOptions, ModelHelpers } from './base'
+import { CallChatCompletionOptions, ModelHelpers } from './types'
 import { ApiError } from './errors'
 
 export type GeminiModel = keyof typeof modelConfig
@@ -88,7 +88,6 @@ export default class Gemeni extends AbstractAISDKModel {
     })
 
     return provider.chat(this.options.geminiModel, {
-      useSearchGrounding: options.webBrowsing,
       structuredOutputs: false,
       safetySettings: [
         { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
