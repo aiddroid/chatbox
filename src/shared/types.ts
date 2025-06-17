@@ -1,5 +1,6 @@
 import { LanguageModelUsage } from 'ai'
 import { v4 as uuidv4 } from 'uuid'
+import { MCPServerConfig } from '@/packages/mcp/types'
 
 export interface SearchResultItem {
   title: string
@@ -47,7 +48,7 @@ export type MessageTextPart = { type: 'text'; text: string }
 export type MessageImagePart = { type: 'image'; storageKey: string }
 export type MessageToolCallPart<Args = unknown, Result = unknown> = {
   type: 'tool-call'
-  state: 'call' | 'result'
+  state: 'call' | 'result' | 'error'
   toolCallId: string
   toolName: string
   args: Args
@@ -73,7 +74,7 @@ export interface Message {
   cancel?: () => void
   generating?: boolean
 
-  aiProvider?: ModelProvider
+  aiProvider?: ModelProvider | string
   model?: string
 
   style?: string // image style
@@ -111,7 +112,7 @@ export interface Message {
   firstTokenLatency?: number // AI 回答首字耗时(毫秒) - 从发送请求到接收到第一个字的时间间隔
 }
 
-export type SettingWindowTab = 'ai' | 'display' | 'chat' | 'advanced' | 'extension'
+export type SettingWindowTab = 'ai' | 'display' | 'chat' | 'advanced' | 'extension' | 'mcp'
 
 export type ExportChatScope = 'all_threads' | 'current_thread'
 
@@ -213,7 +214,7 @@ export function createMessage(role: MessageRole = MessageRoleEnum.User, content:
   }
 }
 
-export enum ModelProvider {
+export enum ModelProviderEnum {
   ChatboxAI = 'chatbox-ai',
   OpenAI = 'openai',
   Azure = 'azure',
@@ -224,11 +225,13 @@ export enum ModelProvider {
   Groq = 'groq',
   DeepSeek = 'deepseek',
   SiliconFlow = 'siliconflow',
+  VolcEngine = 'volcengine',
   LMStudio = 'lm-studio',
   Perplexity = 'perplexity',
   XAI = 'xAI',
   Custom = 'custom',
 }
+export type ModelProvider = ModelProviderEnum | string
 
 export type ProviderModelInfo = {
   modelId: string
@@ -239,7 +242,7 @@ export type ProviderModelInfo = {
   maxOutput?: number
 }
 
-export type ProviderBaseInfo = {
+export type BuiltinProviderBaseInfo = {
   id: ModelProvider
   name: string
   type: ModelProviderType
@@ -253,10 +256,12 @@ export type ProviderBaseInfo = {
   defaultSettings?: ProviderSettings
 }
 
-export type CustomProviderBaseInfo = Omit<ProviderBaseInfo, 'id' | 'isCustom'> & {
+export type CustomProviderBaseInfo = Omit<BuiltinProviderBaseInfo, 'id' | 'isCustom'> & {
   id: string
   isCustom: true
 }
+
+export type ProviderBaseInfo = BuiltinProviderBaseInfo | CustomProviderBaseInfo
 
 export type ProviderSettings = Partial<{
   apiHost: string
@@ -279,6 +284,7 @@ export enum ModelProviderType {
   ChatboxAI = 'chatbox-ai',
   OpenAI = 'openai',
   Gemini = 'gemini',
+  Claude = 'claude',
 }
 
 export type ModelMeta = {
@@ -308,6 +314,11 @@ export interface ExtensionSettings {
     provider: 'build-in' | 'bing' | 'tavily' // 搜索提供方
     tavilyApiKey?: string // Tavily API 密钥
   }
+}
+
+export interface MCPSettings {
+  servers: MCPServerConfig[]
+  enabledBuiltinServers: string[]
 }
 
 export interface Settings extends SessionSettings {
@@ -352,6 +363,8 @@ export interface Settings extends SessionSettings {
   fontSize: number
   spellCheck: boolean
 
+  startupPage: 'home' | 'session' // 启动页
+
   // disableQuickToggleShortcut?: boolean // 是否关闭快捷键切换窗口显隐（弃用，为了兼容历史数据，这个字段永远不要使用）
 
   defaultPrompt?: string // 新会话的默认 prompt
@@ -379,6 +392,7 @@ export interface Settings extends SessionSettings {
   shortcuts: ShortcutSetting
 
   extension: ExtensionSettings
+  mcp: MCPSettings
 }
 
 export interface ShortcutSetting {
