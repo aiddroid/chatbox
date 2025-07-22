@@ -1,3 +1,10 @@
+import * as Sentry from '@sentry/react'
+import { getDefaultStore } from 'jotai'
+import { identity, pickBy, throttle } from 'lodash'
+import { getModel } from 'src/shared/models'
+import type { onResultChangeWithCancel } from 'src/shared/models/types'
+import { v4 as uuidv4 } from 'uuid'
+import { createModelDependencies } from '@/adapters'
 import * as dom from '@/hooks/dom'
 import { languageNameMap } from '@/i18n/locales'
 import { formatChatAsHtml, formatChatAsMarkdown, formatChatAsTxt } from '@/lib/format-chat'
@@ -5,40 +12,74 @@ import * as appleAppStore from '@/packages/apple_app_store'
 import * as localParser from '@/packages/local-parser'
 import { generateImage, generateText, streamText } from '@/packages/model-calls'
 import { getModelDisplayName } from '@/packages/model-setting-utils'
-import { getModel } from '@/packages/models'
+import * as remote from '@/packages/remote'
+import { estimateTokensFromMessages } from '@/packages/token'
+import { router } from '@/router'
+import { StorageKeyGenerator } from '@/storage/StoreStorage'
+import { trackEvent } from '@/utils/track'
+import * as defaults from '../../shared/defaults'
+
+/**
+ * 跟踪生成事件
+ */
+function trackGenerateEvent(
+  settings: Settings,
+  globalSettings: Settings,
+  sessionType: SessionType | undefined,
+  options?: { operationType?: 'send_message' | 'regenerate' }
+) {
+  // 获取更有意义的 provider 标识
+  let providerIdentifier = settings.provider
+  if (settings.provider?.startsWith('custom-provider-')) {
+    // 对于自定义 provider，使用 apiHost 作为标识
+    const providerSettings = globalSettings.providers?.[settings.provider]
+    if (providerSettings?.apiHost) {
+      try {
+        const url = new URL(providerSettings.apiHost)
+        providerIdentifier = `custom:${url.hostname}`
+      } catch {
+        providerIdentifier = `custom:${providerSettings.apiHost}`
+      }
+    } else {
+      providerIdentifier = 'custom:unknown'
+    }
+  }
+
+  const store = getDefaultStore()
+  const webBrowsing = store.get(atoms.inputBoxWebBrowsingModeAtom)
+
+  trackEvent('generate', {
+    provider: providerIdentifier,
+    model: settings.modelId || 'unknown',
+    operation_type: options?.operationType || 'unknown',
+    web_browsing_enabled: webBrowsing ? 'true' : 'false',
+    session_type: sessionType || 'chat',
+  })
+}
 import {
   AIProviderNoImplementedPaintError,
   ApiError,
   BaseError,
   ChatboxAIAPIError,
   NetworkError,
-} from '@/packages/models/errors'
-import type { onResultChangeWithCancel } from '@/packages/models/types'
-import * as remote from '@/packages/remote'
-import { estimateTokensFromMessages } from '@/packages/token'
-import { router } from '@/router'
-import { StorageKeyGenerator } from '@/storage/StoreStorage'
-import * as Sentry from '@sentry/react'
-import { getDefaultStore } from 'jotai'
-import { identity, pickBy, throttle } from 'lodash'
-import { v4 as uuidv4 } from 'uuid'
-import * as defaults from '../../shared/defaults'
+} from '../../shared/models/errors'
 import {
-  ExportChatFormat,
-  ExportChatScope,
-  Message,
-  MessageFile,
-  MessageImagePart,
-  MessageLink,
-  MessagePicture,
-  ModelProvider,
-  ModelProviderEnum,
-  Session,
-  SessionMeta,
-  SessionSettings,
-  SessionThread,
-  Settings,
   createMessage,
+  type ExportChatFormat,
+  type ExportChatScope,
+  type Message,
+  type MessageFile,
+  type MessageImagePart,
+  type MessageLink,
+  type MessagePicture,
+  type ModelProvider,
+  ModelProviderEnum,
+  type Session,
+  type SessionMeta,
+  type SessionSettings,
+  type SessionThread,
+  type SessionType,
+  type Settings,
 } from '../../shared/types'
 import i18n from '../i18n'
 import * as promptFormat from '../packages/prompts'
@@ -518,10 +559,11 @@ export async function submitNewUserMessage(params: {
   needGenerating: boolean
   attachments: File[]
   links: { url: string }[]
-  webBrowsing?: boolean
 }) {
   const { currentSessionId, newUserMsg, needGenerating, attachments, links } = params
-  let { webBrowsing } = params
+  const store = getDefaultStore()
+  const webBrowsing = store.get(atoms.inputBoxWebBrowsingModeAtom)
+
   // 如果存在附件，现在发送消息中构建空白的文件信息，用于占位，等待上传完成后再修改
   if (attachments && attachments.length > 0) {
     newUserMsg.files = attachments.map((f, ix) => ({
@@ -573,7 +615,9 @@ export async function submitNewUserMessage(params: {
   try {
     // 如果本次消息开启了联网问答，需要检查当前模型是否支持
     // 桌面版&手机端总是支持联网问答，不再需要检查模型是否支持
-    if (webBrowsing && platform.type === 'web' && !getModel(settings, { uuid: '' }).isSupportToolUse()) {
+    const dependencies = await createModelDependencies()
+    const model = getModel(settings, { uuid: '' }, dependencies)
+    if (webBrowsing && platform.type === 'web' && !model.isSupportToolUse()) {
       if (remoteConfig.setting_chatboxai_first) {
         throw ChatboxAIAPIError.fromCodeName('model_not_support_web_browsing', 'model_not_support_web_browsing')
       } else {
@@ -605,6 +649,12 @@ export async function submitNewUserMessage(params: {
           await new Promise((resolve) => setTimeout(resolve, 3000)) // 等待一段时间，方便显示提示
           const result = await platform.parseFileLocally(attachment, { tokenLimit: tokenLimitPerFile })
           if (!result.isSupported || !result.key) {
+            if (platform.type === 'mobile') {
+              throw ChatboxAIAPIError.fromCodeName(
+                'mobile_not_support_local_file_parsing',
+                'mobile_not_support_local_file_parsing'
+              )
+            }
             // 根据当前 IP，判断是否在错误中推荐 Chatbox AI
             if (remoteConfig.setting_chatboxai_first) {
               throw ChatboxAIAPIError.fromCodeName('model_not_support_file', 'model_not_support_file')
@@ -672,9 +722,12 @@ export async function submitNewUserMessage(params: {
     ) {
       Sentry.captureException(error) // unexpected error should be reported
     }
+    if (!(err instanceof ApiError || err instanceof NetworkError || err instanceof AIProviderNoImplementedPaintError)) {
+      Sentry.captureException(err) // unexpected error should be reported
+    }
     let errorCode: number | undefined
-    if (error instanceof BaseError) {
-      errorCode = error.code
+    if (err instanceof BaseError) {
+      errorCode = err.code
     }
 
     newAssistantMsg = {
@@ -696,7 +749,7 @@ export async function submitNewUserMessage(params: {
   }
   // 根据需要，生成这条回复消息
   if (needGenerating) {
-    return generate(currentSessionId, newAssistantMsg, { webBrowsing })
+    return generate(currentSessionId, newAssistantMsg, { operationType: 'send_message' })
   }
 }
 
@@ -706,7 +759,11 @@ export async function submitNewUserMessage(params: {
  * @param targetMsg
  * @returns
  */
-export async function generate(sessionId: string, targetMsg: Message, options?: { webBrowsing?: boolean }) {
+export async function generate(
+  sessionId: string,
+  targetMsg: Message,
+  options?: { operationType?: 'send_message' | 'regenerate' }
+) {
   // 获得依赖的数据
   const store = getDefaultStore()
   const globalSettings = store.get(atoms.settingsAtom)
@@ -716,6 +773,9 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
     return
   }
   const settings = session.settings ? mergeSettings(globalSettings, session.settings, session.type) : globalSettings
+
+  // 跟踪生成事件
+  trackGenerateEvent(settings, globalSettings, session.type, options)
 
   // 将消息的状态修改成初始状态
   targetMsg = {
@@ -759,17 +819,21 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
   }
 
   try {
-    const model = getModel(settings, configs)
+    const dependencies = await createModelDependencies()
+    const model = getModel(settings, configs, dependencies)
+    const sessionKnowledgeBaseMap = store.get(atoms.sessionKnowledgeBaseMapAtom)
+    const knowledgeBase = sessionKnowledgeBaseMap[sessionId]
+    const webBrowsing = store.get(atoms.inputBoxWebBrowsingModeAtom)
     switch (session.type) {
       // 对话消息生成
       case 'chat':
-      case undefined:
+      case undefined: {
         const startTime = Date.now()
-        let firstTokenLatency: number | undefined = undefined
+        let firstTokenLatency: number | undefined
         const promptMsgs = await genMessageContext(settings, messages.slice(0, targetMsgIx))
         const throttledModifyMessage = throttle<onResultChangeWithCancel>((updated) => {
           const text = getMessageText(targetMsg)
-          if (!firstTokenLatency && (text.length > 0 || updated.reasoningContent)) {
+          if (!firstTokenLatency && text.length > 0) {
             firstTokenLatency = Date.now() - startTime
           }
           targetMsg = {
@@ -786,8 +850,9 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
         await streamText(model, {
           messages: promptMsgs,
           onResultChangeWithCancel: throttledModifyMessage,
-          webBrowsing: options?.webBrowsing,
           providerOptions: settings.providerOptions,
+          knowledgeBase,
+          webBrowsing,
         })
         targetMsg = {
           ...targetMsg,
@@ -798,8 +863,9 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
         }
         modifyMessage(sessionId, targetMsg, true)
         break
+      }
       // 图片消息生成
-      case 'picture':
+      case 'picture': {
         // 取当前消息之前最近的一条用户消息作为 prompt
         let prompt = ''
         for (let i = targetMsgIx; i >= 0; i--) {
@@ -813,12 +879,9 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
           targetMsg.status = []
           modifyMessage(sessionId, targetMsg, true)
         }
-        if (settings.imageGenerateNum === undefined) {
-          throw new Error(`Unknown session type: ${session.type}, generate failed`)
-        }
         await generateImage(model, {
           prompt,
-          num: settings.imageGenerateNum,
+          num: settings.imageGenerateNum || 1,
           callback: async (picBase64) => {
             const storageKey = StorageKeyGenerator.picture(`${sessionId}:${targetMsg.id}`)
             // 图片需要存储到 indexedDB，如果直接使用 OpenAI 返回的图片链接，图片链接将随着时间而失效
@@ -834,6 +897,7 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
         }
         modifyMessage(sessionId, targetMsg, true)
         break
+      }
       default:
         throw new Error(`Unknown session type: ${session.type}, generate failed`)
     }
@@ -849,9 +913,12 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
     ) {
       Sentry.captureException(error) // unexpected error should be reported
     }
+    if (!(err instanceof ApiError || err instanceof NetworkError || err instanceof AIProviderNoImplementedPaintError)) {
+      Sentry.captureException(err) // unexpected error should be reported
+    }
     let errorCode: number | undefined
-    if (error instanceof BaseError) {
-      errorCode = error.code
+    if (err instanceof BaseError) {
+      errorCode = err.code
     }
     targetMsg = {
       ...targetMsg,
@@ -876,10 +943,10 @@ export async function generate(sessionId: string, targetMsg: Message, options?: 
  * @param sessionId 会话ID
  * @param msgId 消息ID
  */
-export async function generateMore(sessionId: string, msgId: string, options?: { webBrowsing?: boolean }) {
+export async function generateMore(sessionId: string, msgId: string) {
   const newAssistantMsg = createMessage('assistant', '')
   insertMessageAfter(sessionId, newAssistantMsg, msgId)
-  await generate(sessionId, newAssistantMsg, options)
+  await generate(sessionId, newAssistantMsg, { operationType: 'regenerate' })
 }
 
 export async function generateMoreInNewFork(sessionId: string, msgId: string) {
@@ -887,18 +954,18 @@ export async function generateMoreInNewFork(sessionId: string, msgId: string) {
   await generateMore(sessionId, msgId)
 }
 
-export async function regenerateInNewFork(sessionId: string, msg: Message, options?: { webBrowsing?: boolean }) {
+export async function regenerateInNewFork(sessionId: string, msg: Message) {
   const messageList = getCurrentMessages()
   const messageIndex = messageList.findIndex((m) => m.id === msg.id)
   const previousMessageIndex = messageIndex - 1
   if (previousMessageIndex < 0) {
     // 如果目标消息是第一条消息，则直接重新生成
-    generate(sessionId, msg)
+    generate(sessionId, msg, { operationType: 'regenerate' })
     return
   }
   const forkMessage = messageList[previousMessageIndex]
   await createNewFork(forkMessage.id)
-  return generateMore(sessionId, forkMessage.id, { webBrowsing: options?.webBrowsing })
+  return generateMore(sessionId, forkMessage.id)
 }
 
 async function _generateName(sessionId: string, modifyName: (sessionId: string, name: string) => void) {
@@ -926,7 +993,8 @@ async function _generateName(sessionId: string, modifyName: (sessionId: string, 
   }
   const configs = await platform.getConfig()
   try {
-    const model = getModel(settings, configs)
+    const dependencies = await createModelDependencies()
+    const model = getModel(settings, configs, dependencies)
     const result = await generateText(
       model,
       promptFormat.nameConversation(
@@ -1290,7 +1358,7 @@ export async function createNewFork(forkMessageId: string) {
     return { data, updated: true }
   }
 
-  let { data, updated } = updateFn(currentSession.messages)
+  const { data, updated } = updateFn(currentSession.messages)
   if (updated) {
     saveSession({
       id: currentSession.id,
@@ -1348,7 +1416,7 @@ export async function switchFork(forkMessageId: string, direction: 'next' | 'pre
     return { data, updated: true }
   }
 
-  let { data, updated } = updateFn(currentSession.messages)
+  const { data, updated } = updateFn(currentSession.messages)
   if (updated) {
     saveSession({
       id: currentSession.id,
@@ -1412,7 +1480,7 @@ export async function deleteFork(forkMessageId: string) {
   }
 
   // 更新当前消息列表，如果没有找到消息则自动更新线程消息列表
-  let { data, updated } = updateFn(currentSession.messages)
+  const { data, updated } = updateFn(currentSession.messages)
   if (updated) {
     saveSession({
       id: currentSession.id,
@@ -1466,7 +1534,7 @@ export async function expandFork(forkMessageId: string) {
   }
 
   // 更新当前消息列表，如果没有找到消息则自动更新线程消息列表
-  let { data, updated } = updateFn(currentSession.messages)
+  const { data, updated } = updateFn(currentSession.messages)
   if (updated) {
     saveSession({
       id: currentSession.id,

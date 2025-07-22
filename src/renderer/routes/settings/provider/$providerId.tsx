@@ -1,5 +1,6 @@
 import NiceModal from '@ebay/nice-modal-react'
 import {
+  Badge,
   Button,
   Flex,
   Modal,
@@ -17,6 +18,7 @@ import {
   IconBulb,
   IconCircleMinus,
   IconCirclePlus,
+  IconDiscount2,
   IconExternalLink,
   IconEye,
   IconPlus,
@@ -27,28 +29,31 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { type ChangeEvent, useState } from 'react'
+import { capitalize } from 'lodash'
+import { ChangeEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SystemProviders } from 'src/shared/defaults'
+import { getModel } from 'src/shared/models'
 import {
   MessageRoleEnum,
-  type ModelOptionGroup,
+  ModelOptionGroup,
   ModelProviderEnum,
   ModelProviderType,
-  type ProviderModelInfo,
+  ProviderModelInfo,
 } from 'src/shared/types'
-import PopoverConfirm from '@/components/PopoverConfirm'
-import { useProviderSettings, useSettings } from '@/hooks/useSettings'
-import { getModelSettingUtil } from '@/packages/model-setting-utils'
-import { getModel } from '@/packages/models'
 import {
   normalizeAzureEndpoint,
   normalizeClaudeHost,
   normalizeGeminiHost,
   normalizeOpenAIApiHostAndPath,
-} from '@/packages/models/llm_utils'
+} from 'src/shared/utils'
+import { createModelDependencies } from '@/adapters'
+import PopoverConfirm from '@/components/PopoverConfirm'
+import { useProviderSettings, useSettings } from '@/hooks/useSettings'
+import { streamText } from '@/packages/model-calls'
+import { getModelSettingUtil } from '@/packages/model-setting-utils'
 import platform from '@/platform'
-import { add, add as addToast } from '@/stores/toastActions'
+import { add as addToast } from '@/stores/toastActions'
 
 export const Route = createFileRoute('/settings/provider/$providerId')({
   component: RouteComponent,
@@ -130,10 +135,6 @@ function ProviderSettings({ providerId }: { providerId: string }) {
   const [fetchedModels, setFetchedModels] = useState<ProviderModelInfo[]>()
 
   const handleFetchModels = async () => {
-    if (baseInfo?.isCustom === true) {
-      return
-    }
-
     try {
       setFetchedModels(undefined)
       setFetchingModels(true)
@@ -147,10 +148,10 @@ function ProviderSettings({ providerId }: { providerId: string }) {
         setFetchedModels(
           modelList
             .reduce((pre, cur) => [...pre, ...cur.options], [] as ModelOptionGroup['options'])
-            .map((option) => ({ modelId: option.value }) as ProviderModelInfo)
+            .map((option) => ({ modelId: option.value } as ProviderModelInfo))
         )
       } else {
-        add(t('Failed to fetch models'))
+        addToast(t('Failed to fetch models'))
       }
       setFetchingModels(false)
     } catch (error) {
@@ -167,16 +168,18 @@ function ProviderSettings({ providerId }: { providerId: string }) {
     try {
       setApiKeyChecking(true)
       const configs = await platform.getConfig()
+      const dependencies = await createModelDependencies()
       const modelInstance = getModel(
         {
           ...settings,
           provider: providerId as any,
           modelId: checkModel,
         },
-        configs
+        configs,
+        dependencies
       )
-      await modelInstance.chat(
-        [
+      await streamText(modelInstance, {
+        messages: [
           {
             id: '',
             role: MessageRoleEnum.User,
@@ -188,8 +191,10 @@ function ProviderSettings({ providerId }: { providerId: string }) {
             ],
           },
         ],
-        {}
-      )
+        onResultChangeWithCancel: (result) => {
+          console.log(result)
+        },
+      })
       setApiKeyAvaliable(true)
     } catch (e: any) {
       try {
@@ -226,25 +231,23 @@ function ProviderSettings({ providerId }: { providerId: string }) {
           </Button>
         )}
         {baseInfo.isCustom && (
-          <>
-            <PopoverConfirm
-              title={t('Confirm to delete this custom provider?')}
-              confirmButtonColor="chatbox-error"
-              onConfirm={() => {
-                setSettings({
-                  customProviders: settings.customProviders?.filter((p) => p.id !== baseInfo.id),
-                })
-                navigate({ to: './..' as any, replace: true })
-              }}
-            >
-              <Button
-                variant="transparent"
-                size="compact-xs"
-                leftSection={<IconTrash size={24} />}
-                color="chatbox-error"
-              ></Button>
-            </PopoverConfirm>
-          </>
+          <PopoverConfirm
+            title={t('Confirm to delete this custom provider?')}
+            confirmButtonColor="chatbox-error"
+            onConfirm={() => {
+              setSettings({
+                customProviders: settings.customProviders?.filter((p) => p.id !== baseInfo.id),
+              })
+              navigate({ to: './..' as any, replace: true })
+            }}
+          >
+            <Button
+              variant="transparent"
+              size="compact-xs"
+              leftSection={<IconTrash size={24} />}
+              color="chatbox-error"
+            ></Button>
+          </PopoverConfirm>
         )}
       </Flex>
 
@@ -300,8 +303,8 @@ function ProviderSettings({ providerId }: { providerId: string }) {
                   !providerSettings?.apiKey
                     ? t('API Key is required to check connection')
                     : !checkModel
-                      ? t('Add at least one model to check connection')
-                      : null
+                    ? t('Add at least one model to check connection')
+                    : null
                 }
               >
                 <Button
@@ -421,6 +424,14 @@ function ProviderSettings({ providerId }: { providerId: string }) {
                     apiPath: providerSettings?.apiPath,
                   }).apiPath}
               </Text>
+              {providerSettings?.apiHost?.includes('aihubmix.com') && (
+                <Flex align="center" gap={4}>
+                  <IconDiscount2 size={14} color="var(--mantine-color-chatbox-tertiary-text)" />
+                  <Text span size="xs" c="chatbox-tertiary">
+                    {t('AIHubMix integration in Chatbox offers 10% discount')}
+                  </Text>
+                </Flex>
+              )}
             </Stack>
 
             <Switch
@@ -553,27 +564,30 @@ function ProviderSettings({ providerId }: { providerId: string }) {
                 </Text>
 
                 <Flex flex="0 0 auto" gap="xs" align="center">
-                  {model.capabilities?.includes('reasoning') && (
-                    <Tooltip label={t('Reasoning')} events={{ hover: true, focus: true, touch: true }}>
-                      <Text span c="chatbox-warning" className="flex items-center">
-                        <IconBulb size={20} />
-                      </Text>
-                    </Tooltip>
-                  )}
-                  {model.capabilities?.includes('vision') && (
-                    <Tooltip label={t('Vision')} events={{ hover: true, focus: true, touch: true }}>
-                      <Text span c="chatbox-brand" className="flex items-center">
-                        <IconEye size={20} />
-                      </Text>
-                    </Tooltip>
-                  )}
-                  {model.capabilities?.includes('tool_use') && (
-                    <Tooltip label={t('Tool Use')} events={{ hover: true, focus: true, touch: true }}>
-                      <Text span c="chatbox-success" className="flex items-center">
-                        <IconTool size={20} />
-                      </Text>
-                    </Tooltip>
-                  )}
+                  {model.type && model.type !== 'chat' && <Badge color="blue">{t(capitalize(model.type))}</Badge>}
+                  <>
+                    {model.capabilities?.includes('reasoning') && (
+                      <Tooltip label={t('Reasoning')}>
+                        <Text span c="chatbox-warning" className="flex items-center">
+                          <IconBulb size={20} />
+                        </Text>
+                      </Tooltip>
+                    )}
+                    {model.capabilities?.includes('vision') && (
+                      <Tooltip label={t('Vision')}>
+                        <Text span c="chatbox-brand" className="flex items-center">
+                          <IconEye size={20} />
+                        </Text>
+                      </Tooltip>
+                    )}
+                    {model.capabilities?.includes('tool_use') && (
+                      <Tooltip label={t('Tool Use')}>
+                        <Text span c="chatbox-success" className="flex items-center">
+                          <IconTool size={20} />
+                        </Text>
+                      </Tooltip>
+                    )}
+                  </>
                 </Flex>
 
                 <Flex flex="0 0 auto" gap="xs" align="center" className="ml-auto">
