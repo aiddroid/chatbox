@@ -7,15 +7,16 @@ import StarIcon from '@mui/icons-material/Star'
 import StarOutlineIcon from '@mui/icons-material/StarOutline'
 import VrpanoIcon from '@mui/icons-material/Vrpano'
 import { Avatar, IconButton, ListItemIcon, ListItemText, MenuItem, Typography, useTheme } from '@mui/material'
+import { useSetAtom } from 'jotai'
 import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SessionMeta } from '@/../shared/types'
 import { ImageInStorage } from '@/components/Image'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import { cn } from '@/lib/utils'
+import * as atoms from '@/stores/atoms'
 import * as sessionActions from '@/stores/sessionActions'
-import { getSession, removeSession, saveSession } from '@/stores/sessionStorageMutations'
-import { delay } from '@/utils'
+import { getSessionAsync, removeSession, saveSession } from '@/stores/sessionStorageMutations'
 import { ConfirmDeleteMenuItem } from './ConfirmDeleteButton'
 import StyledMenu from './StyledMenu'
 
@@ -29,6 +30,7 @@ function _SessionItem(props: Props) {
   const { t } = useTranslation()
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null)
   const open = Boolean(anchorEl)
+  const setShowSidebar = useSetAtom(atoms.showSidebarAtom)
   const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
     event.stopPropagation()
     event.preventDefault()
@@ -39,6 +41,9 @@ function _SessionItem(props: Props) {
   }
   const onClick = () => {
     sessionActions.switchCurrentSession(session.id)
+    if (isSmallScreen) {
+      setShowSidebar(false)
+    }
   }
   const theme = useTheme()
   const medianSize = theme.typography.pxToRem(24)
@@ -104,10 +109,8 @@ function _SessionItem(props: Props) {
         <MenuItem
           key={`${session.id}edit`}
           onClick={async () => {
-            getSession(session.id)
-            await delay(200) // ensure the next getSession will not return undefined
             NiceModal.show('session-settings', {
-              session: getSession(session.id),
+              session: await getSessionAsync(session.id),
             })
             handleMenuClose()
           }}

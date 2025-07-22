@@ -1,11 +1,11 @@
 import { v4 as uuidv4 } from 'uuid'
 import {
-  Config,
+  type Config,
   ModelProviderEnum,
   ModelProviderType,
-  ProviderBaseInfo,
-  SessionSettings,
-  Settings,
+  type ProviderBaseInfo,
+  type SessionSettings,
+  type Settings,
   Theme,
 } from './types'
 
@@ -522,14 +522,24 @@ export const SystemProviders: ProviderBaseInfo[] = [
       apiHost: 'https://api.x.ai',
       models: [
         {
-          modelId: 'grok-3-beta',
-          contextWindow: 128_000,
-          capabilities: ['vision', 'tool_use'],
+          modelId: 'grok-4-0709',
+          contextWindow: 256_000,
+          capabilities: ['vision', 'tool_use', 'reasoning'],
         },
         {
-          modelId: 'grok-3-mini-beta',
-          contextWindow: 128_000,
-          capabilities: ['vision', 'tool_use'],
+          modelId: 'grok-3',
+          contextWindow: 131_072,
+          capabilities: ['tool_use'],
+        },
+        {
+          modelId: 'grok-3-mini',
+          contextWindow: 131_072,
+          capabilities: ['tool_use', 'reasoning'],
+        },
+        {
+          modelId: 'grok-3-fast',
+          contextWindow: 131_072,
+          capabilities: ['tool_use'],
         },
         {
           modelId: 'grok-2-vision-1212',
@@ -578,16 +588,22 @@ export const SystemProviders: ProviderBaseInfo[] = [
       apiHost: 'https://api.groq.com/openai',
       models: [
         {
-          modelId: 'llama-3.2-1b-preview',
+          modelId: 'llama-3.3-70b-versatile',
+          contextWindow: 131_072,
+          maxOutput: 32_768,
+          capabilities: ['tool_use'],
         },
         {
-          modelId: 'llama-3.2-3b-preview',
+          modelId: 'moonshotai/kimi-k2-instruct',
+          contextWindow: 131_072,
+          maxOutput: 16_384,
+          capabilities: ['tool_use'],
         },
         {
-          modelId: 'llama-3.2-11b-text-preview',
-        },
-        {
-          modelId: 'llama-3.2-90b-text-preview',
+          modelId: 'qwen/qwen3-32b',
+          contextWindow: 131_072,
+          maxOutput: 40_960,
+          capabilities: ['tool_use'],
         },
       ],
     },

@@ -56,6 +56,8 @@ function trackGenerateEvent(
     session_type: sessionType || 'chat',
   })
 }
+
+import { imageOCR } from '@/packages/model-calls/preprocess'
 import {
   AIProviderNoImplementedPaintError,
   ApiError,
@@ -844,9 +846,7 @@ export async function generate(
           }
           modifyMessage(sessionId, targetMsg)
         }, 100)
-        if (!model.isSupportVision() && messages.some((m) => m.contentParts.some((c) => c.type === 'image'))) {
-          throw ChatboxAIAPIError.fromCodeName('model_not_support_image_2', 'model_not_support_image_2')
-        }
+
         await streamText(model, {
           messages: promptMsgs,
           onResultChangeWithCancel: throttledModifyMessage,
@@ -1307,10 +1307,11 @@ export async function exportCurrentSessionChat(content: ExportChatScope, format:
 export async function createNewFork(forkMessageId: string) {
   const store = getDefaultStore()
   const currentSession = store.get(atoms.currentSessionAtom)
-  if (!currentSession || !currentSession.messageForksHash) {
+  if (!currentSession) {
     return
   }
-  const messageForksHash = currentSession.messageForksHash
+
+  const messageForksHash = currentSession.messageForksHash || {}
 
   const updateFn = (data: Message[]): { data: Message[]; updated: boolean } => {
     const forkMessageIndex = data.findIndex((m) => m.id === forkMessageId)
@@ -1346,12 +1347,28 @@ export async function createNewFork(forkMessageId: string) {
     messageForksHash[forkMessageId] = forks
     data = data.slice(0, forkMessageIndex + 1)
 
-    // 限制分叉数量，超过20个则清理掉最旧
+    // clean empty fork / LRU fork when reaching MAX_FORK_COUNT
     const keys = Object.keys(messageForksHash)
-    if (keys.length > 20) {
-      keys.sort((a, b) => messageForksHash[a].createdAt - messageForksHash[b].createdAt)
-      keys.slice(0, keys.length - 20).forEach((k) => {
-        delete messageForksHash[k]
+    const MAX_FORK_COUNT = 50
+    if (keys.length > MAX_FORK_COUNT) {
+      const forkWeights = keys.map((key) => {
+        const fork = messageForksHash[key]
+        const totalMessages = fork.lists.reduce((sum, list) => sum + list.messages.length, 0)
+        const isEmpty = totalMessages === 0
+        const daysSinceCreated = (Date.now() - fork.createdAt) / (1000 * 60 * 60 * 24)
+        let weight = totalMessages * 10 - daysSinceCreated
+        // specially handle empty forkMessages
+        if (isEmpty) {
+          weight -= 1000
+        }
+        return { key, weight, totalMessages, isEmpty, createdAt: fork.createdAt }
+      })
+
+      forkWeights.sort((a, b) => a.weight - b.weight)
+
+      const toDelete = forkWeights.slice(0, keys.length - MAX_FORK_COUNT)
+      toDelete.forEach((item) => {
+        delete messageForksHash[item.key]
       })
     }
 
