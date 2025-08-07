@@ -344,6 +344,10 @@ export default abstract class AbstractAISDKModel implements ModelInterface {
         break
       }
       case 'reasoning': {
+        // 部分提供方会随文本返回空的reasoning，防止分割正常的content
+        if (knownChunk.textDelta.trim() === '') {
+          break
+        }
         currentTextPart = undefined
         currentReasoningPart = this.createOrUpdateReasoningPart(
           knownChunk.textDelta,
@@ -494,10 +498,10 @@ export default abstract class AbstractAISDKModel implements ModelInterface {
       maxSteps: Number.MAX_SAFE_INTEGER,
       tools: options.tools,
       abortSignal: options.signal,
-      experimental_transform: smoothStream({
-        delayInMs: 20, // optional: defaults to 10ms
-        chunking: 'line', // optional: defaults to 'word'
-      }),
+      // experimental_transform: smoothStream({
+      //   delayInMs: 10, // optional: defaults to 10ms
+      //   chunking: 'word', // optional: defaults to 'word'
+      // }),
       ...callSettings,
     })
 

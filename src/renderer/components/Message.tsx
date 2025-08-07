@@ -159,8 +159,8 @@ const _Message: FC<Props> = (props) => {
   }
 
   const onCopyMsg = () => {
-    copyToClipboard(getMessageText(msg))
-    toastActions.add(t('copied to clipboard'))
+    copyToClipboard(getMessageText(msg, true, false))
+    toastActions.add(t('copied to clipboard'), 2000)
     setAnchorEl(null)
   }
 
@@ -694,10 +694,6 @@ const _Message: FC<Props> = (props) => {
                               aria-label="edit"
                               color={props.sessionType === 'picture' ? 'secondary' : 'primary'}
                               onClick={onEditClick}
-                              disabled={
-                                // 图文消息暂时不让编辑
-                                !isEmpty(msg.contentParts) && !msg.contentParts.every((c) => c.type === 'text')
-                              }
                             >
                               <EditIcon fontSize="small" />
                             </IconButton>

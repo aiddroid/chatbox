@@ -51,12 +51,12 @@ export type MessageInfoPart = { type: 'info'; text: string; values?: Record<stri
  * Represents a reasoning/thinking part of a message with timing information
  */
 export type MessageReasoningPart = {
-  type: 'reasoning';
-  text: string;
+  type: 'reasoning'
+  text: string
   /** Timestamp when the thinking process started (milliseconds since epoch) */
-  startTime?: number;
+  startTime?: number
   /** Total duration of the thinking process in milliseconds */
-  duration?: number;
+  duration?: number
 }
 export type MessageToolCallPart<Args = unknown, Result = unknown> = {
   type: 'tool-call'
@@ -262,6 +262,7 @@ export type ModelProvider = ModelProviderEnum | string
 export type ProviderModelInfo = {
   modelId: string
   type?: 'chat' | 'embedding' | 'rerank' // 模型类型，chat/embedding/rerank
+  apiStyle?: 'google' | 'openai' | 'anthropic'
   nickname?: string
   labels?: string[]
   capabilities?: ('vision' | 'reasoning' | 'tool_use' | 'web_search')[]
@@ -530,6 +531,7 @@ export interface CopilotDetail {
 export interface Toast {
   id: string
   content: string
+  duration?: number
 }
 
 export enum Theme {
