@@ -69,7 +69,7 @@ export type InputBoxProps = {
   }
   fullWidth?: boolean
   onSelectModel?(provider: string, model: string): void
-  onSubmit?(payload: InputBoxPayload): Promise<boolean>
+  onSubmit?(payload: InputBoxPayload): Promise<void>
   onStopGenerating?(): boolean
   onStartNewThread?(): boolean
   onRollbackThread?(): boolean
@@ -107,7 +107,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     const [newSessionState, setNewSessionState] = useAtom(atoms.newSessionStateAtom)
     const currentSessionId = sessionId || 'default'
     const isNewSession = currentSessionId === 'new'
-    const { messageInput, setMessageInput } = useMessageInput('', { isNewSession })
+    const { messageInput, setMessageInput, clearDraft } = useMessageInput('', { isNewSession })
 
     const knowledgeBase = isNewSession ? newSessionState.knowledgeBase : sessionKnowledgeBaseMap[currentSessionId]
     const setKnowledgeBase = useCallback(
@@ -210,31 +210,29 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
       }
 
       try {
-        const res = await onSubmit?.({
-          input: messageInput,
-          pictureKeys,
-          attachments,
-          links,
+        // clone params to avoid mutating the original state
+        const params = {
+          input: messageInput.trim(),
+          pictureKeys: pictureKeys && [...pictureKeys],
+          attachments: attachments && [...attachments],
+          links: links && [...links],
           needGenerating,
-        })
-        if (!res) {
-          return
         }
 
         // 重置输入内容
-        setMessageInput('')
+        clearDraft()
         setPictureKeys([])
         setAttachments([])
         setLinks([])
         // 重置清理上下文按钮
         setShowRollbackThreadButton(false)
-
-        trackingEvent('send_message', { event_category: 'user' })
-
         // 如果提交成功，添加到输入历史 (非手机端)
         if (platform.type !== 'mobile') {
-          addInputBoxHistory(messageInput)
+          addInputBoxHistory(params.input)
         }
+
+        await onSubmit?.(params)
+        trackingEvent('send_message', { event_category: 'user' })
       } catch (e) {
         console.error('Error submitting message:', e)
         toastActions.add((e as Error)?.message || t('An error occurred while sending the message.'))
